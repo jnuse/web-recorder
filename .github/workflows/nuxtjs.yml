@@ -45,7 +45,6 @@ jobs:
           else
             echo "Unable to determine package manager"
             exit 1
-          fi
       - name: Setup Node
         uses: actions/setup-node@v3
         with:
@@ -54,10 +53,6 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v3
         with:
-          # Automatically inject router.base in your Nuxt configuration file and set
-          # target to static (https://nuxtjs.org/docs/configuration-glossary/configuration-target/).
-          #
-          # You may remove this line if you want to manage the configuration yourself.
           static_site_generator: nuxt
       - name: Restore cache
         uses: actions/cache@v3
@@ -72,19 +67,38 @@ jobs:
         run: ${{ steps.detect-package-manager.outputs.manager }} ${{ steps.detect-package-manager.outputs.command }}
       - name: Static HTML export with Nuxt
         run: ${{ steps.detect-package-manager.outputs.manager }} run generate
-      - name: Upload artifact
-        uses: actions/upload-pages-artifact@v1
-        with:
-          path: ./dist
 
-  # Deployment job
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v2
+      # 压缩 dist 文件夹
+      - name: Compress dist folder to record.zip
+        run: zip -r record.zip ./dist
+
+      # 获取最新的 release tag，并设置新的 tag
+      - name: Get latest tag
+        id: get_latest_tag
+        run: |
+          # 获取最新的 tag，如果没有则返回 0.0.0
+          latest_tag=$(git describe --tags --abbrev=0 || echo "1.0.0")
+          echo "Latest tag: $latest_tag"
+          # 获取主要版本、次要版本和修订号
+          IFS='.' read -r major minor patch <<< "${latest_tag#v}"
+          # 递增修订号
+          new_tag="$major.$minor.$((patch + 1))"
+          echo "New tag: $new_tag"
+          echo "new_tag=$new_tag" >> $GITHUB_OUTPUT
+
+      # 创建新的 tag 并推送
+      - name: Create new tag
+        run: |
+          git config user.name "GitHub Actions"
+          git config user.email "actions@github.com"
+          git tag ${{ steps.get_latest_tag.outputs.new_tag }}
+          git push origin ${{ steps.get_latest_tag.outputs.new_tag }}
+
+      # 发布压缩文件到 GitHub Release
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ steps.get_latest_tag.outputs.new_tag }}
+          files: record.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
